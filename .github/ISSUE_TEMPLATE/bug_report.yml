@@ -1,0 +1,43 @@
+name: Bug report
+description: Report incorrect titles, installation failures, or terminal compatibility problems
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, and what title did you expect?
+    validations:
+      required: true
+  - type: input
+    id: claude-version
+    attributes:
+      label: Claude Code version
+      placeholder: "2.1.217"
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal and version
+      placeholder: "Terminal.app 2.15"
+    validations:
+      required: true
+  - type: input
+    id: shell
+    attributes:
+      label: Shell and multiplexer
+      placeholder: "zsh; no tmux"
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Doctor output
+      description: Remove paths or other information you do not want to share.
+      render: shell
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true

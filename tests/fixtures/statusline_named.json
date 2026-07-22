@@ -1,0 +1,13 @@
+{
+  "model": {
+    "id": "claude-opus-4-1",
+    "display_name": "Opus 4.1"
+  },
+  "session": {
+    "id": "12345678-1234-5678-9012-123456789012",
+    "name": "terminal label"
+  },
+  "workspace": {
+    "current_dir": "/Users/example/project"
+  }
+}

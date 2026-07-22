@@ -1,0 +1,169 @@
+# Terminal Label
+
+[![Test](https://github.com/Valdemar-Yu/terminal_label/actions/workflows/test.yml/badge.svg)](https://github.com/Valdemar-Yu/terminal_label/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+让多个 Claude Code 标签页能直接区分模型和任务：
+
+```text
+GPT-5.6 Sol · terminal-label README
+Opus 4.8 · auth refactor
+Sonnet 5 · release checks
+```
+
+Terminal Label 会把终端标签页标题同步为当前模型和 Claude Code session
+名称。执行 `/model` 或 `/rename` 后会继续更新，也能保留原有自定义 status
+line，不发送遥测数据。
+
+[English](README.md)
+
+## 环境要求
+
+- Claude Code 2.1.217 或更高版本
+- Python 3.9 或更高版本
+- macOS 或 Linux，包括 WSL
+
+## 安装
+
+把仓库添加为 Claude Code marketplace，再安装插件：
+
+```bash
+claude plugin marketplace add Valdemar-Yu/terminal_label
+claude plugin install terminal-label@terminal-label
+```
+
+启动或重载 Claude Code，然后运行：
+
+```text
+/terminal-label:setup
+```
+
+setup 会对当前 Claude 配置目录做可撤销修改。执行后新开一个 Claude Code
+session，让 Claude Code 原生动态标题不再覆盖 Terminal Label。
+
+启动时可以直接给 session 命名：
+
+```bash
+claude --name "terminal-label README"
+```
+
+也可以随时重命名当前 session：
+
+```text
+/rename terminal-label README
+```
+
+session 尚无自定义名称或自动生成名称时，Terminal Label 使用当前目录名。
+
+### 多套 Claude 配置
+
+插件遵循 `CLAUDE_CONFIG_DIR`。每套 Claude Code 配置需要分别安装和 setup：
+
+```bash
+CLAUDE_CONFIG_DIR="$HOME/.claude-plbbl" \
+  claude plugin marketplace add Valdemar-Yu/terminal_label
+CLAUDE_CONFIG_DIR="$HOME/.claude-plbbl" \
+  claude plugin install terminal-label@terminal-label
+CLAUDE_CONFIG_DIR="$HOME/.claude-plbbl" claude
+```
+
+进入该 session 后运行 `/terminal-label:setup`。Terminal Label 不会自动扫描或
+改写其他配置目录。
+
+### 从源码试用
+
+```bash
+git clone https://github.com/Valdemar-Yu/terminal_label.git
+cd terminal_label
+claude --plugin-dir ./plugins/terminal-label
+```
+
+在这个开发 session 中运行 `/terminal-label:setup`。
+
+## 工作原理
+
+Claude Code 会把 `model.display_name`、`session_name` 和当前工作区等实时信息
+传给 status line 进程。setup 安装一个不依赖第三方包的 Python 代理：
+
+1. 生成并清理 `模型 · session`；
+2. 通过控制终端写入 OSC 标题序列；
+3. 把原始 JSON 继续交给原有 status line 命令，并原样返回其输出。
+
+原 status line 刷新慢于 5 秒时，代理会改成每 5 秒刷新一次，避免空闲状态下执行
+`/model` 或 `/rename` 后标签长期不更新。setup 还会为后续 session 禁用 Claude
+Code 内置动态标题。原 status line 和标题
+设置只保存在本地，供卸载时恢复。运行时不读取 prompt 和 transcript 内容。
+
+## 命令
+
+| 命令 | 用途 |
+| --- | --- |
+| `/terminal-label:setup` | 安装或更新 status line 代理 |
+| `/terminal-label:doctor` | 检查配置、运行时、终端和 tmux 检测结果 |
+| `/terminal-label:uninstall` | 恢复安装前的 Claude Code 设置 |
+
+已安装的运行时也提供 `render`、`doctor`、`install` 和 `uninstall` 子命令，供
+本地开发和脚本调用。
+
+## 终端兼容性
+
+| 环境 | 状态 | 说明 |
+| --- | --- | --- |
+| macOS Terminal.app | 支持 | 通过 `/dev/tty` 写 OSC 0 |
+| iTerm2 | 支持 | 使用 OSC 0 |
+| Ghostty | 支持 | 使用 OSC 0 |
+| WezTerm | 支持 | 使用 OSC 0 |
+| kitty | 支持 | 使用 OSC 0 |
+| tmux | 尽力支持 | 更新活动 pane/window；建议每个 window 只运行一个 Claude session |
+| WSL + Windows Terminal | 尽力支持 | 需要可写的 `/dev/tty` |
+| 原生 Windows | 暂不支持 | 没有 `/dev/tty` 输出路径 |
+
+部分终端 profile 会忽略应用设置的标题。如果 setup 成功但标签文字不变，请在
+终端 profile 中允许应用修改标题。
+
+## 卸载
+
+运行：
+
+```text
+/terminal-label:uninstall
+```
+
+卸载会恢复 setup 保存的完整 status line，并恢复之前的
+`CLAUDE_CODE_DISABLE_TERMINAL_TITLE`。如果其他工具或后续手工操作已经替换了
+Terminal Label 的命令，卸载会拒绝覆盖这项新配置。如果已经先删了插件，仍可用
+稳定运行时自行卸载：
+
+```bash
+"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/terminal-label/bin/terminal-label" uninstall
+```
+
+之后可以移除插件和 marketplace：
+
+```bash
+claude plugin uninstall terminal-label@terminal-label
+claude plugin marketplace remove terminal-label
+```
+
+## 隐私与安全
+
+- 不发送网络请求和遥测。
+- 不解析 prompt 或 transcript。
+- 模型名和 session 名写入终端转义序列前会删除控制字符。
+- 本地状态可能包含原 status line 命令，文件权限仅允许当前用户读取。
+- 原子写入配置，首次修改前创建备份。
+
+漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+
+## 开发
+
+```bash
+python3 -m unittest discover -s tests -v
+claude plugin validate --strict .
+```
+
+提交 PR 前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 许可证
+
+[MIT](LICENSE)

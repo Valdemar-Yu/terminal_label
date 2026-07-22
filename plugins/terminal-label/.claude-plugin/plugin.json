@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "terminal-label",
+  "displayName": "Terminal Label",
+  "version": "0.1.0",
+  "description": "Keep terminal tab titles synchronized with the active Claude Code model and session name",
+  "author": {
+    "name": "Valdemar_Yu"
+  },
+  "homepage": "https://github.com/Valdemar-Yu/terminal_label",
+  "repository": "https://github.com/Valdemar-Yu/terminal_label",
+  "license": "MIT",
+  "keywords": [
+    "terminal",
+    "title",
+    "session",
+    "model",
+    "tabs"
+  ]
+}

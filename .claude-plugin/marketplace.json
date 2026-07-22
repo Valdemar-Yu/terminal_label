@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "terminal-label",
+  "description": "Claude Code plugins from the terminal_label project",
+  "owner": {
+    "name": "Valdemar_Yu"
+  },
+  "plugins": [
+    {
+      "name": "terminal-label",
+      "description": "Keep terminal tab titles synchronized with the active Claude Code model and session name",
+      "source": "./plugins/terminal-label",
+      "category": "productivity",
+      "homepage": "https://github.com/Valdemar-Yu/terminal_label"
+    }
+  ]
+}
