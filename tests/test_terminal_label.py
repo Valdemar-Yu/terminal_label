@@ -417,6 +417,17 @@ class SettingsTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_version_cli(self) -> None:
+        completed = subprocess.run(
+            [str(EXECUTABLE), "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout, "terminal-label 0.2.0\n")
+
     def test_render_cli(self) -> None:
         completed = subprocess.run(
             [
@@ -485,6 +496,89 @@ class CliTests(unittest.TestCase):
             restored = json.loads(settings.read_text(encoding="utf-8"))
             self.assertEqual(restored["statusLine"]["command"], "printf original")
             self.assertFalse(runtime.exists())
+
+    def test_claude_all_batch_cli_without_network(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            profiles = home / ".claude-all" / "profiles"
+            profiles.mkdir(parents=True)
+            (profiles / "direct.env").write_text(
+                "CLAUDE_ALL_LAUNCH=direct\n", encoding="utf-8"
+            )
+            env = dict(os.environ, HOME=str(home))
+
+            install = subprocess.run(
+                [
+                    str(EXECUTABLE),
+                    "install-claude-all",
+                    "--home",
+                    str(home),
+                    "--skip-plugin-install",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(install.returncode, 0, install.stderr)
+            self.assertIn("direct", install.stdout)
+
+            runtime = home / ".claude-all" / "terminal-label" / "bin" / "terminal-label"
+            self.assertTrue(runtime.is_file())
+            self.assertTrue(
+                (home / ".claude-all" / "terminal-label" / "lib" / "claude_all.py").is_file()
+            )
+            doctor = subprocess.run(
+                [str(runtime), "doctor-claude-all", "--home", str(home)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+            self.assertIn("OK statusLine proxy is installed", doctor.stdout)
+
+            uninstall = subprocess.run(
+                [str(runtime), "uninstall-claude-all", "--home", str(home)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(uninstall.returncode, 0, uninstall.stderr)
+            self.assertFalse(
+                (home / ".claude-all" / "terminal-label-claude-all.json").exists()
+            )
+
+    def test_claude_all_cli_reports_parse_error_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            profiles = home / ".claude-all" / "profiles"
+            profiles.mkdir(parents=True)
+            (profiles / "unsafe.env").write_text(
+                "CLAUDE_ALL_LAUNCH=direct\nCLAUDE_CONFIG_DIR='$(touch bad)'\n",
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                [
+                    str(EXECUTABLE),
+                    "install-claude-all",
+                    "--home",
+                    str(home),
+                    "--skip-plugin-install",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env=dict(os.environ, HOME=str(home)),
+            )
+            self.assertEqual(completed.returncode, 2)
+            self.assertIn("unsafe shell syntax", completed.stderr)
+            self.assertNotIn("Traceback", completed.stderr)
 
     def test_install_conflict_has_nonzero_exit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -55,6 +55,41 @@ claude --name "terminal-label README"
 
 session 尚无自定义名称或自动生成名称时，Terminal Label 使用当前目录名。
 
+### 一次安装到整个 claude-all
+
+如果通过 [claude-all](https://github.com/Valdemar-Yu/claude-all) 启动多个
+provider，先在当前 profile 安装插件，然后运行：
+
+```text
+/terminal-label:setup-claude-all
+```
+
+从源码 checkout 运行的等价命令是：
+
+```bash
+./plugins/terminal-label/bin/terminal-label install-claude-all
+```
+
+它会发现 `~/.claude-all/profiles/*.env`，对所有不重复的 Claude 配置目录安装
+Terminal Label，保留已有统一 status line，并适配 PLBBL、Fugu 等 claudish
+profile。程序不会 source profile 文件，也不会把 token 值写入状态文件。
+
+只检查全部 profile：
+
+```bash
+./plugins/terminal-label/bin/terminal-label doctor-claude-all
+```
+
+撤销批量安装：
+
+```bash
+./plugins/terminal-label/bin/terminal-label uninstall-claude-all
+```
+
+只有 profile 当前 SHA-256 与安装记录一致时才会自动恢复。如果安装后又手工修改过
+profile，卸载会报告冲突而不是覆盖。通过 `claude-all add` 新增 profile 后，再运行
+一次 `install-claude-all`。
+
 ### 多套 Claude 配置
 
 插件遵循 `CLAUDE_CONFIG_DIR`。每套 Claude Code 配置需要分别安装和 setup：
@@ -98,11 +133,13 @@ Code 内置动态标题。原 status line 和标题
 
 | 命令 | 用途 |
 | --- | --- |
-| `/terminal-label:setup` | 安装或更新 status line 代理 |
+| `/terminal-label:setup` | 安装或更新单个 profile 的 status line 代理 |
+| `/terminal-label:setup-claude-all` | 发现并安装全部 claude-all profile |
 | `/terminal-label:doctor` | 检查配置、运行时、终端和 tmux 检测结果 |
 | `/terminal-label:uninstall` | 恢复安装前的 Claude Code 设置 |
 
-已安装的运行时也提供 `render`、`doctor`、`install` 和 `uninstall` 子命令，供
+已安装的运行时还提供 `render`、`doctor`、`install`、`uninstall`、
+`install-claude-all`、`doctor-claude-all` 和 `uninstall-claude-all` 子命令，供
 本地开发和脚本调用。
 
 ## 终端兼容性
@@ -147,10 +184,12 @@ claude plugin marketplace remove terminal-label
 
 ## 隐私与安全
 
-- 不发送网络请求和遥测。
+- 运行时不发送网络请求和遥测；批量安装只通过 Claude plugin CLI 拉取公开的
+  GitHub marketplace。
 - 不解析 prompt 或 transcript。
 - 模型名和 session 名写入终端转义序列前会删除控制字符。
-- 本地状态可能包含原 status line 命令，文件权限仅允许当前用户读取。
+- 本地状态可能包含原 status line 命令，文件权限仅允许当前用户读取。批量状态只
+  记录路径和 SHA-256，不记录 token 值；相邻 profile 备份保留在本机并使用 `0600`。
 - 原子写入配置，首次修改前创建备份。
 
 漏洞报告方式见 [SECURITY.md](SECURITY.md)。

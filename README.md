@@ -57,6 +57,44 @@ Or rename the current session at any time:
 If the session has no custom or generated name yet, Terminal Label uses the
 current directory name.
 
+### Install across claude-all
+
+If you launch several providers through
+[claude-all](https://github.com/Valdemar-Yu/claude-all), install the plugin once
+in the current profile, then run:
+
+```text
+/terminal-label:setup-claude-all
+```
+
+The equivalent command from a source checkout is:
+
+```bash
+./plugins/terminal-label/bin/terminal-label install-claude-all
+```
+
+It discovers `~/.claude-all/profiles/*.env`, installs Terminal Label into each
+unique Claude config directory, preserves the existing unified status line, and
+adapts claudish profiles such as PLBBL and Fugu. It never sources profile files
+or records token values in its state file.
+
+Check every profile without changing files:
+
+```bash
+./plugins/terminal-label/bin/terminal-label doctor-claude-all
+```
+
+Undo the batch installation:
+
+```bash
+./plugins/terminal-label/bin/terminal-label uninstall-claude-all
+```
+
+Profile edits are restored only if their SHA-256 still matches the installed
+version. If a profile was edited afterward, uninstall reports a conflict rather
+than overwriting it. Re-run `install-claude-all` after adding a new claude-all
+profile.
+
 ### Alternate Claude config directories
 
 The plugin follows `CLAUDE_CONFIG_DIR`. Install and configure each Claude Code
@@ -104,12 +142,14 @@ uninstall can restore them. Prompts and transcript contents are never read.
 
 | Command | Purpose |
 | --- | --- |
-| `/terminal-label:setup` | Install or update the status line proxy |
+| `/terminal-label:setup` | Install or update one profile's status line proxy |
+| `/terminal-label:setup-claude-all` | Discover and install every claude-all profile |
 | `/terminal-label:doctor` | Check config, runtime, terminal, and tmux detection |
 | `/terminal-label:uninstall` | Restore the previous Claude Code settings |
 
-The installed runtime also accepts `render`, `doctor`, `install`, and
-`uninstall` subcommands for local development and scripting.
+The installed runtime also accepts `render`, `doctor`, `install`, `uninstall`,
+`install-claude-all`, `doctor-claude-all`, and `uninstall-claude-all`
+subcommands for local development and scripting.
 
 ## Terminal support
 
@@ -155,12 +195,14 @@ claude plugin marketplace remove terminal-label
 
 ## Privacy and security
 
-- No network requests or telemetry.
+- No runtime network requests or telemetry. Batch setup uses Claude's plugin CLI
+  only to fetch the public GitHub marketplace.
 - No prompt or transcript parsing.
 - Control characters are removed from model and session names before writing
   terminal escape sequences.
 - Local state can contain the previous status line command and is written with
-  user-only permissions.
+  user-only permissions. Batch state records paths and SHA-256 hashes, not token
+  values; adjacent profile backups remain local with mode `0600`.
 - Settings writes are atomic and backed up before the first change.
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting.

@@ -20,6 +20,7 @@ import unicodedata
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
+VERSION = "0.2.0"
 DEFAULT_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 MANAGED_FLAG = "--terminal-label-managed"
 TITLE_ENV_KEY = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"
@@ -925,13 +926,18 @@ def install_runtime(settings_path: Path) -> Path:
     source_root = _source_root()
     destination = runtime_executable(settings_path)
     source_executable = source_root / "bin" / "terminal-label"
-    source_module = source_root / "lib" / "terminal_label.py"
-    destination_module = destination.parent.parent / "lib" / "terminal_label.py"
+    source_modules = [source_root / "lib" / "terminal_label.py"]
+    batch_module = source_root / "lib" / "claude_all.py"
+    if batch_module.is_file():
+        source_modules.append(batch_module)
+    destination_lib = destination.parent.parent / "lib"
     try:
-        # The launcher only imports the module, so replace the module first to
-        # avoid a new launcher observing an older runtime during an update.
-        if source_module.resolve() != destination_module.resolve():
-            _atomic_copy(source_module, destination_module, 0o600)
+        # The launcher only imports modules, so replace modules first to avoid a
+        # new launcher observing an older runtime during an update.
+        for source_module in source_modules:
+            destination_module = destination_lib / source_module.name
+            if source_module.resolve() != destination_module.resolve():
+                _atomic_copy(source_module, destination_module, 0o600)
         if source_executable.resolve() != destination.resolve():
             _atomic_copy(source_executable, destination, 0o700)
     except OSError as exc:
@@ -946,6 +952,7 @@ def remove_runtime(settings_path: Path) -> bool:
     candidates = [
         executable,
         root / "lib" / "terminal_label.py",
+        root / "lib" / "claude_all.py",
     ]
     changed = False
     for path in candidates:
@@ -978,6 +985,7 @@ def _read_render_payload(inline_json: Optional[str]) -> bytes:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="terminal-label")
+    parser.add_argument("--version", action="version", version="%(prog)s " + VERSION)
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
 
     render_parser = subparsers.add_parser("render", help="render model · session")
@@ -1004,6 +1012,18 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("--executable", type=Path, default=None, help=argparse.SUPPRESS)
         if name == "install":
             command_parser.add_argument("--force", action="store_true")
+
+    for name in ("install-claude-all", "doctor-claude-all", "uninstall-claude-all"):
+        command_parser = subparsers.add_parser(name)
+        command_parser.add_argument("--home", type=Path, default=None, help=argparse.SUPPRESS)
+        command_parser.add_argument("--profiles-dir", type=Path, default=None)
+        command_parser.add_argument(
+            "--config-dir", type=Path, action="append", default=[], dest="config_dirs"
+        )
+        if name == "install-claude-all":
+            command_parser.add_argument("--skip-plugin-install", action="store_true")
+        if name == "uninstall-claude-all":
+            command_parser.add_argument("--remove-plugin", action="store_true")
     return parser
 
 
@@ -1032,6 +1052,40 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 tty_path=args.tty,
                 update_tmux=not args.no_tmux,
             )
+
+        if args.subcommand in {
+            "install-claude-all",
+            "doctor-claude-all",
+            "uninstall-claude-all",
+        }:
+            try:
+                from claude_all import doctor_all, install_all, uninstall_all
+            except ImportError as exc:
+                raise TerminalLabelError(
+                    "claude-all support is missing; reinstall or update terminal-label"
+                ) from exc
+            common = {
+                "home": (args.home or Path.home()).expanduser(),
+                "profiles_dir": args.profiles_dir,
+                "extra_config_dirs": tuple(args.config_dirs),
+            }
+            if args.subcommand == "install-claude-all":
+                messages = install_all(
+                    **common,
+                    skip_plugin_install=args.skip_plugin_install,
+                )
+                healthy = True
+            elif args.subcommand == "doctor-claude-all":
+                healthy, messages = doctor_all(**common)
+            else:
+                messages = uninstall_all(
+                    home=common["home"],
+                    remove_plugin=args.remove_plugin,
+                )
+                healthy = True
+            for message in messages:
+                print(message)
+            return 0 if healthy else 1
 
         settings_path = args.settings or default_settings_path()
         if args.executable is not None:
