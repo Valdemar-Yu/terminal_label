@@ -16,6 +16,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "plugins" / "terminal-label" / "lib" / "terminal_label.py"
 EXECUTABLE = ROOT / "plugins" / "terminal-label" / "bin" / "terminal-label"
+CLAUDISH_WRAPPER = ROOT / "plugins" / "terminal-label" / "bin" / "terminal-label-claudish"
 HOOK = ROOT / "plugins" / "terminal-label" / "hooks" / "session-start.py"
 SESSION_END_HOOK = ROOT / "plugins" / "terminal-label" / "hooks" / "session-end.py"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -88,12 +89,54 @@ class RenderTests(unittest.TestCase):
 
 
 class TerminalUpdateTests(unittest.TestCase):
+    def test_title_sequence_covers_tab_window_and_combined_channels(self) -> None:
+        title = "Opus · demo"
+        self.assertEqual(
+            terminal_label.terminal_title_sequence(title),
+            terminal_label.osc_sequence(title, 1)
+            + terminal_label.osc_sequence(title, 2)
+            + terminal_label.osc_sequence(title, 0),
+        )
+
+    @mock.patch.object(terminal_label, "_safe_tty_path")
+    @mock.patch.object(terminal_label.subprocess, "run")
+    def test_resolve_tty_uses_claude_pid_when_dev_tty_is_detached(
+        self, run: mock.Mock, safe_path: mock.Mock
+    ) -> None:
+        run.return_value = subprocess.CompletedProcess([], 0, stdout="ttys009\n")
+        safe_path.side_effect = lambda path: path if path == "/dev/ttys009" else None
+        self.assertEqual(
+            terminal_label.resolve_tty(env={"CLAUDE_PID": "12345"}),
+            "/dev/ttys009",
+        )
+        run.assert_called_once_with(
+            ["ps", "-o", "tty=", "-p", "12345"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=True,
+            timeout=1.0,
+        )
+
+    def test_resolve_tty_rejects_regular_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            regular = Path(directory) / "tty-fake"
+            regular.touch()
+            self.assertIsNone(
+                terminal_label.resolve_tty(
+                    preferred=str(regular), env={"CLAUDE_PID": "not-a-pid"}
+                )
+            )
+
     def test_osc_is_written_to_requested_tty(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "tty"
             target.touch()
             self.assertTrue(terminal_label.write_osc("Opus · demo", str(target)))
-            self.assertEqual(target.read_bytes(), terminal_label.osc_sequence("Opus · demo"))
+            self.assertEqual(
+                target.read_bytes(), terminal_label.terminal_title_sequence("Opus · demo")
+            )
 
     def test_missing_tty_is_best_effort(self) -> None:
         self.assertFalse(terminal_label.write_osc("demo", "/definitely/missing/tty"))
@@ -426,7 +469,32 @@ class CliTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(completed.stdout, "terminal-label 0.2.0\n")
+        self.assertEqual(completed.stdout, "terminal-label 0.2.1\n")
+
+    def test_claudish_wrapper_preserves_model_effort_and_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake = Path(directory) / "claudish"
+            fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
+            fake.chmod(0o755)
+            environment = dict(
+                os.environ,
+                PATH=directory + os.pathsep + os.environ.get("PATH", ""),
+                CLAUDE_ALL_MODEL="oai@test-model",
+                CLAUDE_ALL_EFFORT="high",
+            )
+            completed = subprocess.run(
+                [str(CLAUDISH_WRAPPER), "--name", "test session"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(
+                completed.stdout.splitlines(),
+                ["--model", "oai@test-model", "--effort", "high", "--name", "test session"],
+            )
 
     def test_render_cli(self) -> None:
         completed = subprocess.run(
@@ -609,6 +677,25 @@ class HookTests(unittest.TestCase):
         self.assertEqual(
             terminal_label.render_label(status), "Opus · hook-workspace"
         )
+
+    def test_session_start_persists_resolved_tty(self) -> None:
+        hook_spec = importlib.util.spec_from_file_location("session_start_env", HOOK)
+        assert hook_spec is not None and hook_spec.loader is not None
+        session_start = importlib.util.module_from_spec(hook_spec)
+        hook_spec.loader.exec_module(session_start)
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / "session.env"
+            with mock.patch.object(
+                session_start, "resolve_tty", return_value="/dev/ttys009"
+            ):
+                result = session_start.persist_tty(
+                    {"CLAUDE_ENV_FILE": str(env_file), "CLAUDE_PID": "123"}
+                )
+            self.assertEqual(result, "/dev/ttys009")
+            self.assertEqual(
+                env_file.read_text(encoding="utf-8"),
+                "export TERMINAL_LABEL_TTY=/dev/ttys009\n",
+            )
 
     def test_session_start_prefers_existing_session_title(self) -> None:
         hook_spec = importlib.util.spec_from_file_location("session_start_title", HOOK)

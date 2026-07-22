@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-22
+
+### Fixed
+
+- Preserve Terminal Label installations that existed before batch setup.
+- Make native claudish profiles retain their config directory and managed title.
+- Resolve Fugu and PLBBL wrapper-specific config directory overrides.
+- Checkpoint batch side effects so interrupted installs remain recoverable.
+- Preflight every managed config before batch uninstall and retain retry state.
+- Remove provider credentials from plugin subprocess environments.
+- Detect missing or non-executable stable runtime components in batch doctor.
+- Resolve the Claude process TTY when hooks/status lines have no controlling terminal.
+- Update tab, window, and combined title channels with OSC 1, 2, and 0.
+
 ## [0.2.0] - 2026-07-22
 
 ### Added
@@ -27,6 +41,7 @@ All notable changes to this project are documented here. The format follows
 - Terminal title support for common macOS and Linux terminal emulators, with
   best-effort tmux handling.
 
-[Unreleased]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Valdemar-Yu/terminal_label/releases/tag/v0.1.0

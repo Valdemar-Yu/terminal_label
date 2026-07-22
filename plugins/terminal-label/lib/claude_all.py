@@ -25,6 +25,7 @@ if LIB_DIR not in sys.path:
 import terminal_label  # noqa: E402
 
 STATE_FILENAME = "terminal-label-claude-all.json"
+STATE_VERSION = 2
 PROFILE_BACKUP_SUFFIX = ".terminal-label-claude-all.bak"
 PLUGIN_NAME = "terminal-label@terminal-label"
 MARKETPLACE_NAME = "terminal-label"
@@ -293,14 +294,22 @@ def _profile_record(path: Path, home: Path) -> _ProfileRecord:
         ccgp_config = _read_ccgp_config(config_file)
 
     explicit_dir = values.get("CLAUDE_CONFIG_DIR")
-    if explicit_dir:
-        config_dir = _safe_path(explicit_dir, home, "%s CLAUDE_CONFIG_DIR" % path)
-    elif ccgp:
+    if ccgp:
         config_dir = _safe_path(
-            ccgp_config.get("config_dir", str(home / ".claude-plbbl")),
+            values.get("CCGP_CONFIG_DIR")
+            or ccgp_config.get("config_dir")
+            or str(home / ".claude-plbbl"),
             home,
-            "%s config_dir" % (home / ".config" / "claude-all" / "config"),
+            "%s PLBBL config directory" % path,
         )
+    elif command_name == "claude-fugu":
+        config_dir = _safe_path(
+            values.get("FUGU_CONFIG_DIR") or str(home / ".claude-fugu"),
+            home,
+            "%s FUGU_CONFIG_DIR" % path,
+        )
+    elif explicit_dir:
+        config_dir = _safe_path(explicit_dir, home, "%s CLAUDE_CONFIG_DIR" % path)
     elif launch in ("direct", "claudish"):
         config_dir = (home / ".claude-all").resolve()
     elif launch == "cmd" and command_name == "claude":
@@ -472,6 +481,12 @@ def _updated_profile(
         "CLAUDISH_STATUSLINE_COMMAND": managed_command,
         "CLAUDISH_STATUSLINE_REFRESH": str(REFRESH_INTERVAL),
     }
+    if record.values.get("CLAUDE_ALL_LAUNCH") == "claudish":
+        updates["CLAUDE_ALL_LAUNCH"] = "cmd"
+        updates["CLAUDE_ALL_CMD"] = str(
+            executable.parent / "terminal-label-claudish"
+        )
+        updates["CLAUDE_CONFIG_DIR"] = str(record.info.config_dir)
     if record.info.cc_gpt_plbbl:
         updates["CCGP_STATUSLINE"] = "no"
         for config_key, profile_key in _POOL_FIELDS.items():
@@ -548,7 +563,7 @@ def _load_state(path: Path) -> MutableMapping[str, Any]:
         raise terminal_label.TerminalLabelError("batch state does not exist: %s" % path) from exc
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise terminal_label.TerminalLabelError("could not read batch state %s: %s" % (path, exc)) from exc
-    if not isinstance(data, MutableMapping) or data.get("version") != 1:
+    if not isinstance(data, MutableMapping) or data.get("version") != STATE_VERSION:
         raise terminal_label.TerminalLabelError("unsupported batch state: %s" % path)
     if not isinstance(data.get("configs"), list) or not isinstance(data.get("profiles"), list):
         raise terminal_label.TerminalLabelError("invalid batch state: %s" % path)
@@ -570,10 +585,11 @@ def _default_plugin_runner(args: Sequence[str], env: Mapping[str, str]) -> subpr
 def _run_plugin(
     runner: PluginRunner, args: Sequence[str], home: Path, config_dir: Path
 ) -> None:
-    environment = dict(os.environ)
-    for key in list(environment):
-        if key.startswith(("ANTHROPIC_", "OPENAI_", "LITELLM_", "SAKANA_")):
-            environment.pop(key, None)
+    allowed = {
+        "PATH", "TMPDIR", "TMP", "TEMP", "SHELL", "LANG", "LC_ALL",
+        "TERM", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "SSH_AUTH_SOCK",
+    }
+    environment = {key: value for key, value in os.environ.items() if key in allowed}
     environment["HOME"] = str(home)
     environment["CLAUDE_CONFIG_DIR"] = str(config_dir)
     try:
@@ -610,7 +626,11 @@ def _preflight_state(state: Mapping[str, Any]) -> List[str]:
             continue
         path = Path(entry["path"])
         expected = entry.get("installed_hash")
-        if not isinstance(expected, str) or _file_hash(path) != expected:
+        current = _file_hash(path)
+        allowed_hashes = {expected}
+        if entry.get("stage") == "pending":
+            allowed_hashes.add(entry.get("original_hash"))
+        if not isinstance(expected, str) or current not in allowed_hashes:
             conflicts.append("installed file hash changed: %s" % path)
         backup_value = entry.get("backup")
         original_hash = entry.get("original_hash")
@@ -659,7 +679,7 @@ def batch_install(
         state_hash = _file_hash(path)
     else:
         state = {
-            "version": 1,
+            "version": STATE_VERSION,
             "terminal_label_version": terminal_label.VERSION,
             "complete": False,
             "configs": [],
@@ -677,6 +697,31 @@ def batch_install(
 
     for config_dir in sorted(grouped, key=str):
         new_config = config_dir not in configs_by_dir
+        settings_path = config_dir / "settings.json"
+        executable = terminal_label.runtime_executable(settings_path)
+        names = [record.info.name for record in grouped[config_dir]]
+        entry = configs_by_dir.get(config_dir)
+        if entry is None:
+            already_managed = terminal_label.validate_uninstall(
+                settings_path, executable
+            )
+            entry = {
+                "path": str(settings_path),
+                "config_dir": str(config_dir),
+                "profiles": names,
+                "runtime": str(executable),
+                "stage": "pending",
+                "plugin_managed": not skip_plugin_install,
+                "settings_owned": not already_managed,
+                "runtime_owned": not executable.exists(),
+            }
+            state["configs"].append(entry)
+            configs_by_dir[config_dir] = entry
+            _write_state(path, state, state_hash)
+            state_hash = _file_hash(path)
+        else:
+            entry["profiles"] = names
+
         if new_config and not skip_plugin_install:
             _run_plugin(
                 runner,
@@ -684,29 +729,30 @@ def batch_install(
                 resolved_home,
                 config_dir,
             )
+            entry["stage"] = "marketplace_added"
+            _write_state(path, state, state_hash)
+            state_hash = _file_hash(path)
             _run_plugin(
                 runner,
                 ("plugin", "install", PLUGIN_NAME),
                 resolved_home,
                 config_dir,
             )
-        settings_path = config_dir / "settings.json"
+            entry["stage"] = "plugin_installed"
+            _write_state(path, state, state_hash)
+            state_hash = _file_hash(path)
+
         executable = terminal_label.install_runtime(settings_path)
+        entry["stage"] = "runtime_installed"
+        entry["runtime_hash"] = _file_hash(executable)
+        _write_state(path, state, state_hash)
+        state_hash = _file_hash(path)
         changed, backup = terminal_label.install(settings_path, executable, force=force)
-        names = [record.info.name for record in grouped[config_dir]]
-        entry = configs_by_dir.get(config_dir)
-        if entry is None:
-            entry = {
-                "path": str(settings_path),
-                "config_dir": str(config_dir),
-                "original_hash": None,
-                "backup": str(backup.resolve()) if backup is not None else None,
-                "changed": changed,
-            }
-            state["configs"].append(entry)
-            configs_by_dir[config_dir] = entry
+        if new_config:
+            entry["settings_owned"] = changed
+            entry["backup"] = str(backup.resolve()) if backup is not None else None
         entry.update({
-            "profiles": names,
+            "stage": "installed",
             "runtime": str(executable),
             "runtime_hash": _file_hash(executable),
             "installed_hash": _file_hash(settings_path),
@@ -725,11 +771,30 @@ def batch_install(
     for record in records:
         if not record.info.claudish or record.info.path in installed_profiles:
             continue
-        profile_state = _inject_profile(
+        profile_path = record.info.path
+        if profile_path.is_symlink():
+            raise terminal_label.ConfigConflict(
+                "refusing to replace symlinked profile: %s" % profile_path
+            )
+        original = profile_path.read_bytes()
+        original_hash = _sha256(original)
+        replacement, _ = _updated_profile(
             record, runtime_by_config[record.info.config_dir], resolved_home
         )
+        backup = _write_backup(profile_path, original)
+        profile_state = {
+            "path": str(profile_path),
+            "backup": str(backup),
+            "original_hash": original_hash,
+            "installed_hash": _sha256(replacement),
+            "stage": "pending",
+        }
         state["profiles"].append(profile_state)
-        installed_profiles.add(record.info.path)
+        _write_state(path, state, state_hash)
+        state_hash = _file_hash(path)
+        _atomic_replace(profile_path, replacement, original_hash, mode=0o600)
+        profile_state["stage"] = "installed"
+        installed_profiles.add(profile_path)
         _write_state(path, state, state_hash)
         state_hash = _file_hash(path)
 
@@ -780,6 +845,20 @@ def batch_doctor(
 
     for settings_path, executable in sorted(targets, key=lambda pair: str(pair[0])):
         target_healthy, messages = terminal_label.doctor(settings_path, executable)
+        runtime_root = executable.parent.parent
+        for relative in (
+            Path("lib/claude_all.py"),
+            Path("bin/terminal-label-claudish"),
+        ):
+            candidate = runtime_root / relative
+            executable_component = relative.parent.name == "bin"
+            if candidate.is_file() and (
+                not executable_component or os.access(candidate, os.X_OK)
+            ):
+                messages.append("OK runtime component %s" % relative)
+            else:
+                target_healthy = False
+                messages.append("FAIL runtime component is missing or unusable: %s" % candidate)
         reports[str(settings_path.parent)] = messages
         healthy = target_healthy and healthy
     if not targets:
@@ -798,6 +877,7 @@ def batch_uninstall(
     resolved_home = _home_path(home)
     path = _state_path(resolved_home, state_path)
     state = _load_state(path)
+    state_hash = _file_hash(path)
     conflicts = _preflight_state(state)
     if conflicts:
         raise terminal_label.ConfigConflict("; ".join(conflicts))
@@ -805,12 +885,75 @@ def batch_uninstall(
     runner = plugin_runner or _default_plugin_runner
     configs = list(state["configs"])
 
+    # Validate every owned settings file before the first destructive change.
+    for entry in configs:
+        if entry.get("settings_owned") and entry.get("stage") in {
+            "runtime_installed", "installed"
+        }:
+            owned = terminal_label.validate_uninstall(
+                Path(entry["path"]), Path(entry["runtime"])
+            )
+            entry["settings_active"] = owned
+            if entry.get("stage") == "installed" and not owned:
+                raise terminal_label.ConfigConflict(
+                    "managed statusLine was replaced after batch install: %s"
+                    % entry["path"]
+                )
+
+    # Plugin cleanup is outward-facing and can fail. Run it before local restore
+    # so the intact state remains retryable on a permission/network error.
+    if remove_plugin:
+        for entry in configs:
+            if not entry.get("plugin_managed"):
+                continue
+            config_dir = Path(entry["config_dir"])
+            stage = entry.get("stage")
+            cleanup = entry.get("plugin_cleanup")
+            if (
+                stage in {"plugin_installed", "runtime_installed", "installed"}
+                and cleanup is None
+            ):
+                _run_plugin(
+                    runner,
+                    ("plugin", "uninstall", PLUGIN_NAME),
+                    resolved_home,
+                    config_dir,
+                )
+                entry["plugin_cleanup"] = "plugin_removed"
+                _write_state(path, state, state_hash)
+                state_hash = _file_hash(path)
+                cleanup = "plugin_removed"
+            if (
+                stage in {
+                    "marketplace_added", "plugin_installed", "runtime_installed", "installed"
+                }
+                and cleanup != "marketplace_removed"
+            ):
+                _run_plugin(
+                    runner,
+                    ("plugin", "marketplace", "remove", MARKETPLACE_NAME),
+                    resolved_home,
+                    config_dir,
+                )
+                entry["plugin_cleanup"] = "marketplace_removed"
+                _write_state(path, state, state_hash)
+                state_hash = _file_hash(path)
+
     uninstalled_configs: List[Mapping[str, Any]] = []
     for entry in reversed(configs):
         settings_path = Path(entry["path"])
         executable = Path(entry["runtime"])
-        changed, backup = terminal_label.uninstall(settings_path, executable)
-        runtime_removed = terminal_label.remove_runtime(settings_path)
+        changed = False
+        backup = None
+        if entry.get("settings_owned") and (
+            entry.get("stage") == "installed" or entry.get("settings_active")
+        ):
+            changed, backup = terminal_label.uninstall(settings_path, executable)
+        runtime_removed = (
+            terminal_label.remove_runtime(settings_path)
+            if entry.get("runtime_owned")
+            else False
+        )
         uninstalled_configs.append(
             {
                 "path": str(settings_path),
@@ -825,35 +968,25 @@ def batch_uninstall(
         profile_path = Path(entry["path"])
         backup = Path(entry["backup"])
         replacement = backup.read_bytes()
-        _atomic_replace(
-            profile_path,
-            replacement,
-            entry["installed_hash"],
-            mode=0o600,
-        )
+        current_hash = _file_hash(profile_path)
+        if current_hash == entry["installed_hash"]:
+            _atomic_replace(
+                profile_path,
+                replacement,
+                entry["installed_hash"],
+                mode=0o600,
+            )
+            restored_profiles.append(str(profile_path))
+        elif current_hash != entry["original_hash"]:
+            raise terminal_label.ConfigConflict(
+                "profile changed during batch operation: %s" % profile_path
+            )
         backup.unlink()
-        restored_profiles.append(str(profile_path))
 
     try:
         path.unlink()
     except OSError as exc:
         raise terminal_label.TerminalLabelError("could not remove batch state %s: %s" % (path, exc)) from exc
-
-    if remove_plugin:
-        for entry in configs:
-            config_dir = Path(entry["config_dir"])
-            _run_plugin(
-                runner,
-                ("plugin", "uninstall", PLUGIN_NAME),
-                resolved_home,
-                config_dir,
-            )
-            _run_plugin(
-                runner,
-                ("plugin", "marketplace", "remove", MARKETPLACE_NAME),
-                resolved_home,
-                config_dir,
-            )
 
     return {
         "configs": list(reversed(uninstalled_configs)),

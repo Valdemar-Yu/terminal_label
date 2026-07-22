@@ -20,7 +20,7 @@ import unicodedata
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 DEFAULT_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 MANAGED_FLAG = "--terminal-label-managed"
 TITLE_ENV_KEY = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"
@@ -199,15 +199,79 @@ def parse_status_payload(payload: bytes) -> Mapping[str, Any]:
     return value
 
 
-def osc_sequence(title: str) -> bytes:
-    """Build a safe OSC 0 sequence."""
+def osc_sequence(title: str, code: int = 0) -> bytes:
+    """Build one safe terminal-title OSC sequence."""
+    if code not in (0, 1, 2):
+        raise ValueError("terminal title OSC code must be 0, 1, or 2")
     safe_title = sanitize_text(title)
-    return ("\x1b]0;%s\x07" % safe_title).encode("utf-8")
+    return ("\x1b]%d;%s\x07" % (code, safe_title)).encode("utf-8")
+
+
+def terminal_title_sequence(title: str) -> bytes:
+    """Set icon/tab, window, and combined titles across terminal emulators."""
+    return b"".join(osc_sequence(title, code) for code in (1, 2, 0))
+
+
+def _safe_tty_path(path: str) -> Optional[str]:
+    allowed_name = path.startswith("/dev/tty") or (
+        path.startswith("/dev/pts/") and path.removeprefix("/dev/pts/").isdigit()
+    )
+    if not allowed_name or any(ord(char) < 32 for char in path):
+        return None
+    try:
+        mode = os.stat(path).st_mode
+        if not stat.S_ISCHR(mode):
+            return None
+        descriptor = os.open(path, os.O_WRONLY | getattr(os, "O_NOCTTY", 0))
+        os.close(descriptor)
+    except OSError:
+        return None
+    return path
+
+
+def _tty_from_pid(pid: str) -> Optional[str]:
+    if not pid.isdigit():
+        return None
+    try:
+        completed = subprocess.run(
+            ["ps", "-o", "tty=", "-p", pid],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=True,
+            timeout=1.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    tty_name = completed.stdout.strip()
+    if completed.returncode != 0 or not tty_name or tty_name == "??":
+        return None
+    return _safe_tty_path("/dev/" + tty_name.removeprefix("/dev/"))
+
+
+def resolve_tty(
+    preferred: Optional[str] = None,
+    env: Optional[Mapping[str, str]] = None,
+) -> Optional[str]:
+    """Find the Claude session's real TTY even from detached hook processes."""
+    environment = os.environ if env is None else env
+    candidates = [preferred, environment.get("TERMINAL_LABEL_TTY")]
+    for candidate in candidates:
+        if candidate:
+            resolved = _safe_tty_path(candidate)
+            if resolved:
+                return resolved
+    claude_pid = environment.get("CLAUDE_PID", "")
+    resolved = _tty_from_pid(claude_pid) if claude_pid else None
+    if resolved:
+        return resolved
+    return _safe_tty_path("/dev/tty")
 
 
 def write_osc(title: str, tty_path: str = "/dev/tty") -> bool:
-    """Write OSC 0 directly to the controlling terminal, if available."""
-    payload = osc_sequence(title)
+    """Write compatible title sequences to one known terminal device."""
+    payload = terminal_title_sequence(title)
     descriptor: Optional[int] = None
     try:
         flags = os.O_WRONLY | getattr(os, "O_NOCTTY", 0)
@@ -255,12 +319,13 @@ def rename_tmux_window(
 
 def set_terminal_title(
     title: str,
-    tty_path: str = "/dev/tty",
+    tty_path: Optional[str] = None,
     update_tmux: bool = True,
     env: Optional[Mapping[str, str]] = None,
 ) -> bool:
-    """Apply a terminal title through /dev/tty and, when present, tmux."""
-    tty_updated = write_osc(title, tty_path=tty_path)
+    """Apply a title to the Claude session's tab/window and optional tmux window."""
+    resolved_tty = resolve_tty(preferred=tty_path, env=env)
+    tty_updated = write_osc(title, tty_path=resolved_tty) if resolved_tty else False
     tmux_updated = rename_tmux_window(title, env=env) if update_tmux else False
     return tty_updated or tmux_updated
 
@@ -729,6 +794,41 @@ def install(
     return True, backup
 
 
+def validate_uninstall(settings_path: Path, executable: Path) -> bool:
+    """Validate that uninstall owns the current settings without changing files."""
+    settings_path = settings_path.expanduser()
+    executable = executable.expanduser().resolve()
+    settings, _ = _read_settings(settings_path)
+    existing = settings.get("statusLine")
+    if not isinstance(existing, Mapping):
+        return False
+    current_command = existing.get("command")
+    parsed = parse_proxy_command(current_command)
+    if parsed is None:
+        if _looks_like_terminal_label_proxy(current_command):
+            raise ConfigConflict("statusLine resembles a terminal-label proxy but is not valid")
+        return False
+    owner, _ = parsed
+    try:
+        same_owner = owner.resolve() == executable
+    except OSError:
+        same_owner = owner.absolute() == executable
+    if not same_owner:
+        raise ConfigConflict("statusLine is managed by another terminal-label installation")
+    saved_statusline = _saved_statusline(current_command)
+    _check_managed_statusline_unchanged(existing, current_command, saved_statusline)
+    saved_title = _saved_title_state(current_command)
+    if saved_title is not _UNSPECIFIED:
+        environment = settings.get("env")
+        if not isinstance(environment, Mapping) or environment.get(
+            TITLE_ENV_KEY
+        ) != TITLE_ENV_VALUE:
+            raise ConfigConflict(
+                "env.%s changed after terminal-label was installed" % TITLE_ENV_KEY
+            )
+    return True
+
+
 def uninstall(settings_path: Path, executable: Path) -> Tuple[bool, Optional[Path]]:
     """Remove this installation and restore the proxied command."""
     settings_path = settings_path.expanduser()
@@ -811,6 +911,13 @@ def doctor(settings_path: Path, executable: Path) -> Tuple[bool, List[str]]:
     else:
         healthy = False
         messages.append("FAIL executable is missing or not executable: %s" % executable)
+    if executable.parent.name == "bin" and executable.parent.parent.name == RUNTIME_DIR_NAME:
+        module_path = executable.parent.parent / "lib" / "terminal_label.py"
+        if module_path.is_file():
+            messages.append("OK runtime module terminal_label.py")
+        else:
+            healthy = False
+            messages.append("FAIL runtime module is missing: %s" % module_path)
 
     try:
         settings, _ = _read_settings(settings_path.expanduser())
@@ -867,10 +974,11 @@ def doctor(settings_path: Path, executable: Path) -> Tuple[bool, List[str]]:
                         else:
                             messages.append("OK Claude built-in terminal title is disabled")
 
-    if os.access("/dev/tty", os.W_OK):
-        messages.append("OK /dev/tty is writable")
+    resolved_tty = resolve_tty()
+    if resolved_tty:
+        messages.append("OK terminal device %s" % resolved_tty)
     else:
-        messages.append("WARN /dev/tty is unavailable in this process")
+        messages.append("WARN no writable Claude terminal device was found")
     if os.environ.get("TMUX"):
         if shutil.which("tmux"):
             messages.append("OK tmux client is available")
@@ -926,6 +1034,7 @@ def install_runtime(settings_path: Path) -> Path:
     source_root = _source_root()
     destination = runtime_executable(settings_path)
     source_executable = source_root / "bin" / "terminal-label"
+    source_claudish = source_root / "bin" / "terminal-label-claudish"
     source_modules = [source_root / "lib" / "terminal_label.py"]
     batch_module = source_root / "lib" / "claude_all.py"
     if batch_module.is_file():
@@ -940,6 +1049,9 @@ def install_runtime(settings_path: Path) -> Path:
                 _atomic_copy(source_module, destination_module, 0o600)
         if source_executable.resolve() != destination.resolve():
             _atomic_copy(source_executable, destination, 0o700)
+        destination_claudish = destination.parent / "terminal-label-claudish"
+        if source_claudish.is_file() and source_claudish.resolve() != destination_claudish.resolve():
+            _atomic_copy(source_claudish, destination_claudish, 0o700)
     except OSError as exc:
         raise TerminalLabelError("could not install runtime: %s" % exc) from exc
     return destination.resolve()
@@ -951,6 +1063,7 @@ def remove_runtime(settings_path: Path) -> bool:
     root = executable.parent.parent
     candidates = [
         executable,
+        root / "bin" / "terminal-label-claudish",
         root / "lib" / "terminal_label.py",
         root / "lib" / "claude_all.py",
     ]

@@ -121,8 +121,9 @@ Claude Code 会把 `model.display_name`、`session_name` 和当前工作区等�
 传给 status line 进程。setup 安装一个不依赖第三方包的 Python 代理：
 
 1. 生成并清理 `模型 · session`；
-2. 通过控制终端写入 OSC 标题序列；
-3. 把原始 JSON 继续交给原有 status line 命令，并原样返回其输出。
+2. 即使 hook/status line 子进程没有控制终端，也能从 Claude 主进程解析真实 TTY；
+3. 同时写入 OSC 1、2、0，覆盖标签页、窗口和组合标题；
+4. 把原始 JSON 继续交给原有 status line 命令，并原样返回其输出。
 
 原 status line 刷新慢于 5 秒时，代理会改成每 5 秒刷新一次，避免空闲状态下执行
 `/model` 或 `/rename` 后标签长期不更新。setup 还会为后续 session 禁用 Claude
@@ -146,11 +147,11 @@ Code 内置动态标题。原 status line 和标题
 
 | 环境 | 状态 | 说明 |
 | --- | --- | --- |
-| macOS Terminal.app | 支持 | 通过 `/dev/tty` 写 OSC 0 |
-| iTerm2 | 支持 | 使用 OSC 0 |
-| Ghostty | 支持 | 使用 OSC 0 |
-| WezTerm | 支持 | 使用 OSC 0 |
-| kitty | 支持 | 使用 OSC 0 |
+| macOS Terminal.app | 支持 | 已实测 OSC 0/2 修改选中标签标题 |
+| iTerm2 | 支持 | 使用 OSC 1/2/0 |
+| Ghostty | 支持 | 使用 OSC 1/2/0 |
+| WezTerm | 支持 | 使用 OSC 1/2/0 |
+| kitty | 支持 | 使用 OSC 1/2/0 |
 | tmux | 尽力支持 | 更新活动 pane/window；建议每个 window 只运行一个 Claude session |
 | WSL + Windows Terminal | 尽力支持 | 需要可写的 `/dev/tty` |
 | 原生 Windows | 暂不支持 | 没有 `/dev/tty` 输出路径 |

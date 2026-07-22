@@ -140,6 +140,41 @@ class EnvParsingTests(unittest.TestCase):
         )
         self.assertTrue(grouped[self.home / ".claude-fugu"][0].claudish)
 
+    def test_wrapper_specific_config_directories_take_precedence(self) -> None:
+        profiles = self.home / ".claude-all" / "profiles"
+        profiles.mkdir(parents=True)
+        (profiles / "claude-fugu.env").write_text(
+            "CLAUDE_ALL_LAUNCH=cmd\nCLAUDE_ALL_CMD=claude-fugu\n"
+            "FUGU_CONFIG_DIR=$HOME/custom-fugu\nCLAUDE_CONFIG_DIR=$HOME/wrong\n",
+            encoding="utf-8",
+        )
+        (profiles / "claude-plbbl.env").write_text(
+            "CLAUDE_ALL_LAUNCH=cmd\nCLAUDE_ALL_CMD=cc-gpt-plbbl\n"
+            "CCGP_CONFIG_DIR=$HOME/custom-plbbl\nCLAUDE_CONFIG_DIR=$HOME/wrong\n",
+            encoding="utf-8",
+        )
+        records = {item.name: item for item in claude_all.discover_profiles(self.home)}
+        self.assertEqual(records["claude-fugu"].config_dir, self.home / "custom-fugu")
+        self.assertEqual(records["claude-plbbl"].config_dir, self.home / "custom-plbbl")
+
+    def test_native_claudish_profile_is_rewritten_to_wrapper_command(self) -> None:
+        profiles = self.home / ".claude-all" / "profiles"
+        profiles.mkdir(parents=True)
+        profile = profiles / "gateway.env"
+        profile.write_text(
+            "CLAUDE_ALL_LAUNCH=claudish\nCLAUDE_ALL_MODEL=oai@test\n",
+            encoding="utf-8",
+        )
+        record = claude_all._discover_records(self.home, None)[0]
+        executable = self.home / ".claude-all/terminal-label/bin/terminal-label"
+        _, values = claude_all._updated_profile(record, executable, self.home)
+        self.assertEqual(values["CLAUDE_ALL_LAUNCH"], "cmd")
+        self.assertEqual(values["CLAUDE_CONFIG_DIR"], str(self.home / ".claude-all"))
+        self.assertEqual(
+            values["CLAUDE_ALL_CMD"],
+            str(executable.parent / "terminal-label-claudish"),
+        )
+
 
 class BatchLifecycleTests(unittest.TestCase):
     SECRET = "credential-do-not-copy-this-value"
@@ -262,6 +297,7 @@ class BatchLifecycleTests(unittest.TestCase):
                 all(
                     not any(
                         key.startswith(("ANTHROPIC_", "OPENAI_", "LITELLM_", "SAKANA_"))
+                        or key == "CCGP_TOKEN"
                         for key in env
                     )
                     for env in selected
@@ -349,6 +385,25 @@ class BatchLifecycleTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(len(self.runner.calls), call_count)
 
+    def test_preexisting_single_profile_install_is_adopted_not_removed(self) -> None:
+        runtime = claude_all.terminal_label.install_runtime(self.shared_settings)
+        claude_all.terminal_label.install(self.shared_settings, runtime)
+        managed_before = self.shared_settings.read_bytes()
+
+        state = self.install()
+        entry = next(
+            item for item in state["configs"]
+            if item["config_dir"] == str(self.home / ".claude-all")
+        )
+        self.assertFalse(entry["settings_owned"])
+        self.assertFalse(entry["runtime_owned"])
+
+        claude_all.batch_uninstall(home=self.home, plugin_runner=self.runner)
+        self.assertEqual(self.shared_settings.read_bytes(), managed_before)
+        self.assertTrue(runtime.is_file())
+        claude_all.terminal_label.uninstall(self.shared_settings, runtime)
+        claude_all.terminal_label.remove_runtime(self.shared_settings)
+
     def test_rerun_adds_new_profile_without_reinstalling_existing_configs(self) -> None:
         state = self.install()
         call_count = len(self.runner.calls)
@@ -386,6 +441,20 @@ class BatchLifecycleTests(unittest.TestCase):
         self.assertTrue(restored["unrelated_after_install"])
         self.assertEqual(restored["statusLine"], self.original_settings[self.shared_settings]["statusLine"])
 
+    def test_all_settings_are_preflighted_before_uninstall(self) -> None:
+        self.install()
+        shared = json.loads(self.shared_settings.read_text(encoding="utf-8"))
+        shared["statusLine"]["refreshInterval"] = 99
+        self.shared_settings.write_text(json.dumps(shared), encoding="utf-8")
+        plbbl_before = self.plbbl_settings.read_bytes()
+        plbbl_runtime = claude_all.terminal_label.runtime_executable(self.plbbl_settings)
+
+        with self.assertRaises(claude_all.terminal_label.ConfigConflict):
+            claude_all.batch_uninstall(home=self.home, plugin_runner=self.runner)
+
+        self.assertEqual(self.plbbl_settings.read_bytes(), plbbl_before)
+        self.assertTrue(plbbl_runtime.is_file())
+
     def test_uninstall_refuses_profile_hash_conflict_before_plugin_commands(self) -> None:
         self.install()
         call_count = len(self.runner.calls)
@@ -414,6 +483,45 @@ class BatchLifecycleTests(unittest.TestCase):
             claude_all.batch_uninstall(home=self.home, plugin_runner=self.runner)
         self.assertEqual(len(self.runner.calls), call_count)
 
+    def test_doctor_detects_missing_batch_runtime_component(self) -> None:
+        state = self.install()
+        runtime = Path(state["configs"][0]["runtime"])
+        (runtime.parent.parent / "lib" / "claude_all.py").unlink()
+        healthy, reports = claude_all.batch_doctor(home=self.home)
+        self.assertFalse(healthy)
+        self.assertTrue(
+            any(
+                "claude_all.py" in message and message.startswith("FAIL")
+                for messages in reports.values()
+                for message in messages
+            )
+        )
+
+    def test_doctor_detects_non_executable_claudish_wrapper(self) -> None:
+        state = self.install()
+        runtime = Path(state["configs"][0]["runtime"])
+        wrapper = runtime.parent / "terminal-label-claudish"
+        wrapper.chmod(0o600)
+        healthy, reports = claude_all.batch_doctor(home=self.home)
+        self.assertFalse(healthy)
+        self.assertTrue(
+            any(
+                "terminal-label-claudish" in message and message.startswith("FAIL")
+                for messages in reports.values()
+                for message in messages
+            )
+        )
+
+    def test_old_state_schema_is_rejected(self) -> None:
+        state_path = self.home / ".claude-all" / claude_all.STATE_FILENAME
+        state_path.write_text(
+            json.dumps({"version": 1, "complete": True, "configs": [], "profiles": []}),
+            encoding="utf-8",
+        )
+        with self.assertRaises(claude_all.terminal_label.TerminalLabelError):
+            claude_all.batch_uninstall(home=self.home, plugin_runner=self.runner)
+        self.assertTrue(state_path.exists())
+
     def test_plugin_removal_is_explicit(self) -> None:
         self.install()
         call_count = len(self.runner.calls)
@@ -435,11 +543,111 @@ class BatchLifecycleTests(unittest.TestCase):
             ],
         )
 
-    def test_failed_plugin_install_leaves_explicit_incomplete_state(self) -> None:
+    def test_settings_checkpoint_failure_remains_uninstallable(self) -> None:
+        original_write = claude_all._write_state
+        calls = {"count": 0}
+
+        def fail_after_settings(path, state, expected_hash):
+            calls["count"] += 1
+            if calls["count"] == 4:
+                raise OSError("injected state failure")
+            return original_write(path, state, expected_hash)
+
+        with mock.patch.object(claude_all, "_write_state", side_effect=fail_after_settings):
+            with self.assertRaises(OSError):
+                claude_all.batch_install(
+                    home=self.home,
+                    plugin_runner=self.runner,
+                    skip_plugin_install=True,
+                )
+        claude_all.batch_uninstall(home=self.home, plugin_runner=self.runner)
+        self.assertEqual(
+            json.loads(self.shared_settings.read_text()),
+            self.original_settings[self.shared_settings],
+        )
+
+    def test_profile_checkpoint_failure_remains_uninstallable(self) -> None:
+        original_write = claude_all._write_state
+
+        def fail_after_profile_replace(path, state, expected_hash):
+            if state["profiles"] and state["profiles"][-1].get("stage") == "installed":
+                raise OSError("injected profile state failure")
+            return original_write(path, state, expected_hash)
+
+        with mock.patch.object(
+            claude_all, "_write_state", side_effect=fail_after_profile_replace
+        ):
+            with self.assertRaises(OSError):
+                claude_all.batch_install(
+                    home=self.home,
+                    plugin_runner=self.runner,
+                    skip_plugin_install=True,
+                )
+        claude_all.batch_uninstall(home=self.home, plugin_runner=self.runner)
+        self.assertEqual(
+            self.claudish_profile.read_bytes(),
+            self.original_profiles[self.claudish_profile],
+        )
+
+    def test_failed_explicit_plugin_removal_keeps_state_and_local_install(self) -> None:
+        self.install()
+        state_path = self.home / ".claude-all" / claude_all.STATE_FILENAME
+        settings_before = self.shared_settings.read_bytes()
+
         class FailingRunner:
             def __call__(self, args, env):
                 del args, env
                 return 1
+
+        with self.assertRaises(claude_all.terminal_label.TerminalLabelError):
+            claude_all.batch_uninstall(
+                home=self.home,
+                plugin_runner=FailingRunner(),
+                remove_plugin=True,
+            )
+        self.assertTrue(state_path.is_file())
+        self.assertEqual(self.shared_settings.read_bytes(), settings_before)
+
+    def test_plugin_cleanup_resume_skips_completed_uninstall_step(self) -> None:
+        self.install()
+
+        class FailSecondCall:
+            def __init__(self):
+                self.calls = []
+
+            def __call__(self, args, env):
+                del env
+                self.calls.append(tuple(args))
+                return 1 if len(self.calls) == 2 else 0
+
+        failing = FailSecondCall()
+        with self.assertRaises(claude_all.terminal_label.TerminalLabelError):
+            claude_all.batch_uninstall(
+                home=self.home, plugin_runner=failing, remove_plugin=True
+            )
+        state = json.loads(
+            (self.home / ".claude-all" / claude_all.STATE_FILENAME).read_text()
+        )
+        self.assertEqual(state["configs"][0]["plugin_cleanup"], "plugin_removed")
+
+        retry = RecordingPluginRunner()
+        claude_all.batch_uninstall(
+            home=self.home, plugin_runner=retry, remove_plugin=True
+        )
+        self.assertEqual(
+            retry.calls[0][0],
+            ("plugin", "marketplace", "remove", claude_all.MARKETPLACE_NAME),
+        )
+
+    def test_failed_plugin_install_leaves_explicit_incomplete_state(self) -> None:
+        class FailingRunner:
+            def __init__(self):
+                self.calls = 0
+
+            def __call__(self, args, env):
+                del args, env
+                self.calls += 1
+                return 0 if self.calls == 1 else 1
 
         with self.assertRaises(claude_all.terminal_label.TerminalLabelError):
             claude_all.batch_install(
@@ -449,6 +657,8 @@ class BatchLifecycleTests(unittest.TestCase):
         state_path = self.home / ".claude-all" / claude_all.STATE_FILENAME
         state = json.loads(state_path.read_text(encoding="utf-8"))
         self.assertFalse(state["complete"])
+        self.assertTrue(state["configs"])
+        self.assertEqual(state["configs"][0]["stage"], "marketplace_added")
         with self.assertRaises(claude_all.terminal_label.TerminalLabelError):
             claude_all.batch_install(home=self.home, plugin_runner=self.runner)
         claude_all.batch_uninstall(home=self.home, plugin_runner=self.runner)

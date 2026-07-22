@@ -22,10 +22,14 @@ class ManifestTests(unittest.TestCase):
     def test_plugin_identity_and_version(self):
         plugin = self.load("plugins/terminal-label/.claude-plugin/plugin.json")
         self.assertEqual(plugin["name"], "terminal-label")
-        self.assertEqual(plugin["version"], "0.2.0")
+        self.assertEqual(plugin["version"], "0.2.1")
         self.assertEqual(plugin["license"], "MIT")
         self.assertTrue(
             (ROOT / "plugins/terminal-label/skills/setup-claude-all/SKILL.md").is_file()
+        )
+        self.assertTrue(
+            (ROOT / "plugins/terminal-label/bin/terminal-label-claudish").stat().st_mode
+            & 0o111
         )
 
     def test_hook_commands_use_plugin_root(self):

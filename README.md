@@ -128,8 +128,10 @@ Claude Code passes live session data to a custom status line process, including
 a small dependency-free Python proxy that:
 
 1. formats and sanitizes `model · session`;
-2. writes an OSC terminal-title sequence directly to the controlling TTY;
-3. passes the original JSON to your previous status line command and returns
+2. resolves the Claude process TTY even when the hook/status-line process has no
+   controlling terminal;
+3. writes OSC 1, 2, and 0 sequences for tab, window, and combined titles;
+4. passes the original JSON to your previous status line command and returns
    its output unchanged.
 
 The proxy refreshes every five seconds when the previous status line was slower,
@@ -155,11 +157,11 @@ subcommands for local development and scripting.
 
 | Environment | Status | Notes |
 | --- | --- | --- |
-| macOS Terminal.app | Supported | Uses OSC 0 through `/dev/tty` |
-| iTerm2 | Supported | Uses OSC 0 |
-| Ghostty | Supported | Uses OSC 0 |
-| WezTerm | Supported | Uses OSC 0 |
-| kitty | Supported | Uses OSC 0 |
+| macOS Terminal.app | Supported | Verified with OSC 0/2 on the selected tab |
+| iTerm2 | Supported | Uses OSC 1/2/0 |
+| Ghostty | Supported | Uses OSC 1/2/0 |
+| WezTerm | Supported | Uses OSC 1/2/0 |
+| kitty | Supported | Uses OSC 1/2/0 |
 | tmux | Best effort | Updates the active pane/window; use one Claude session per window |
 | WSL + Windows Terminal | Best effort | Requires a writable `/dev/tty` |
 | Native Windows | Not yet supported | No `/dev/tty` output path |

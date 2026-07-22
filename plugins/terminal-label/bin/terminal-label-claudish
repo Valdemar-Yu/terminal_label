@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${CLAUDE_ALL_MODEL:?terminal-label: CLAUDE_ALL_MODEL is required for claudish profiles}"
+args=(--model "$CLAUDE_ALL_MODEL")
+if [ -n "${CLAUDE_ALL_EFFORT:-}" ]; then
+  args+=(--effort "$CLAUDE_ALL_EFFORT")
+fi
+exec claudish "${args[@]}" "$@"
