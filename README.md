@@ -153,6 +153,47 @@ shell tabs should retain those components. The complete Terminal plist is backed
 up locally with mode `0600`, and restore refuses to overwrite a later manual
 change.
 
+### Stable names in Warp's left tabs
+
+Warp currently has no public API to rename the active sidebar tab dynamically.
+OSC titles can be replaced by Warp's CLI-agent/conversation title. Terminal Label
+therefore uses Warp's supported **Tab Config** custom title, which has stable
+precedence over generated agent text.
+
+Generate one config per claude-all profile:
+
+```text
+/terminal-label:configure-warp
+```
+
+Or from a checkout/runtime:
+
+```bash
+./plugins/terminal-label/bin/terminal-label configure-warp
+```
+
+Then open Warp's `+` menu, select `Terminal Label · <profile>`, choose the repo,
+and enter a session name. Warp creates a tab titled `model · session` and runs:
+
+```text
+claude-all <profile>
+```
+
+The Warp label is intentionally not interpolated into a shell command. If the
+Claude resume name should match too, run `/rename <session>` after startup.
+
+Generated files live in `~/.warp/tab_configs/`; reversible ownership state and
+backups live under `~/.config/terminal-label/`. Check or remove them with:
+
+```bash
+./plugins/terminal-label/bin/terminal-label doctor-warp
+./plugins/terminal-label/bin/terminal-label restore-warp
+```
+
+Current limitation: `/rename` and `/model` inside an already-running session do
+not update Warp's custom tab title. Warp has not yet released its public Local
+Control/warpctrl tab-rename API. The separate agent status icon/badge still works.
+
 ## How it works
 
 Claude Code passes live session data to a custom status line process, including
@@ -179,6 +220,7 @@ uninstall can restore them. Prompts and transcript contents are never read.
 | `/terminal-label:setup` | Install or update one profile's status line proxy |
 | `/terminal-label:setup-claude-all` | Discover and install every claude-all profile |
 | `/terminal-label:configure-terminal-app` | Hide extra Terminal.app title components |
+| `/terminal-label:configure-warp` | Generate stable Warp sidebar Tab Configs |
 | `/terminal-label:doctor` | Check config, runtime, terminal, and tmux detection |
 | `/terminal-label:uninstall` | Restore the previous Claude Code settings |
 

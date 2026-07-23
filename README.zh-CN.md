@@ -143,6 +143,46 @@ TTY、settings 名称及尺寸。所有使用该 Terminal profile 的标签都�
 shell 标签仍需这些组件，应使用单独 profile。完整 Terminal plist 会以 `0600` 权限
 备份在本机；如果之后手工改变过这些设置，恢复命令会报告冲突而不是覆盖。
 
+### Warp 左侧 Tabs 稳定命名
+
+Warp 目前没有公开的动态“重命名当前 tab”接口，普通 OSC 标题还可能被 Warp 的
+CLI-agent/conversation title 覆盖。因此 Terminal Label 使用 Warp 官方支持的 **Tab
+Config** custom title，它在左侧 tabs 中具有稳定优先级。
+
+为每个 claude-all profile 生成一个配置：
+
+```text
+/terminal-label:configure-warp
+```
+
+从源码 checkout 或稳定运行时执行：
+
+```bash
+./plugins/terminal-label/bin/terminal-label configure-warp
+```
+
+之后打开 Warp 的 `+` 菜单，选择 `Terminal Label · <profile>`，选择项目仓库并输入
+session 名。Warp 会创建标题为 `模型 · session` 的 tab，并自动运行：
+
+```text
+claude-all <profile>
+```
+
+Warp label 不会被插入 shell 命令，避免参数注入。如果 Claude 的 resume 名也要一致，
+启动后再执行 `/rename <session>`。
+
+生成文件位于 `~/.warp/tab_configs/`，可逆 ownership state 和备份位于
+`~/.config/terminal-label/`。检查与卸载：
+
+```bash
+./plugins/terminal-label/bin/terminal-label doctor-warp
+./plugins/terminal-label/bin/terminal-label restore-warp
+```
+
+当前限制：session 内执行 `/rename` 或 `/model` 后，Warp custom title 不会动态变化，
+因为 Warp 尚未开放 Local Control/warpctrl tab rename API；独立的 agent 状态图标和
+badge 仍可更新。
+
 ## 工作原理
 
 Claude Code 会把 `model.display_name`、`session_name` 和当前工作区等实时信息
@@ -165,6 +205,7 @@ Code 内置动态标题。原 status line 和标题
 | `/terminal-label:setup` | 安装或更新单个 profile 的 status line 代理 |
 | `/terminal-label:setup-claude-all` | 发现并安装全部 claude-all profile |
 | `/terminal-label:configure-terminal-app` | 隐藏 Terminal.app 额外标题组件 |
+| `/terminal-label:configure-warp` | 生成稳定的 Warp 左侧 Tab Config |
 | `/terminal-label:doctor` | 检查配置、运行时、终端和 tmux 检测结果 |
 | `/terminal-label:uninstall` | 恢复安装前的 Claude Code 设置 |
 

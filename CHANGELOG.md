@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-23
+
+### Added
+
+- Reversible Warp Tab Config generation for every claude-all profile.
+- Stable Warp sidebar titles in the form `model · session`, with a repo picker
+  and automatic profile launch command.
+- `configure-warp`, `doctor-warp`, and `restore-warp` commands plus a setup skill.
+
 ## [0.2.4] - 2026-07-23
 
 ### Added
@@ -64,7 +73,8 @@ All notable changes to this project are documented here. The format follows
 - Terminal title support for common macOS and Linux terminal emulators, with
   best-effort tmux handling.
 
-[Unreleased]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.1...v0.2.2

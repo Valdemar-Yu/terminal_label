@@ -469,7 +469,7 @@ class CliTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(completed.stdout, "terminal-label 0.2.4\n")
+        self.assertEqual(completed.stdout, "terminal-label 0.3.0\n")
 
     def test_claudish_wrapper_preserves_model_effort_and_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -647,6 +647,48 @@ class CliTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 2)
             self.assertIn("unsafe shell syntax", completed.stderr)
             self.assertNotIn("Traceback", completed.stderr)
+
+    def test_warp_config_cli_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            profiles = home / ".claude-all" / "profiles"
+            profiles.mkdir(parents=True)
+            (profiles / "kimi.env").write_text(
+                "CLAUDE_ALL_LAUNCH=direct\nANTHROPIC_MODEL=k3[1m]\n",
+                encoding="utf-8",
+            )
+            environment = dict(os.environ, HOME=str(home))
+            configure = subprocess.run(
+                [str(EXECUTABLE), "configure-warp", "--home", str(home)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(configure.returncode, 0, configure.stderr)
+            config = home / ".warp/tab_configs/terminal_label_kimi.toml"
+            self.assertTrue(config.is_file())
+            self.assertIn("k3[1m] · {{session}}", config.read_text())
+            doctor = subprocess.run(
+                [str(EXECUTABLE), "doctor-warp", "--home", str(home)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+            restore = subprocess.run(
+                [str(EXECUTABLE), "restore-warp", "--home", str(home)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(restore.returncode, 0, restore.stderr)
+            self.assertFalse(config.exists())
 
     def test_install_conflict_has_nonzero_exit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

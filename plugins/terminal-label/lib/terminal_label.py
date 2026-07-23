@@ -20,7 +20,7 @@ import unicodedata
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
-VERSION = "0.2.4"
+VERSION = "0.3.0"
 DEFAULT_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 MANAGED_FLAG = "--terminal-label-managed"
 TITLE_ENV_KEY = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"
@@ -1036,7 +1036,7 @@ def install_runtime(settings_path: Path) -> Path:
     source_executable = source_root / "bin" / "terminal-label"
     source_claudish = source_root / "bin" / "terminal-label-claudish"
     source_modules = [source_root / "lib" / "terminal_label.py"]
-    for optional_name in ("claude_all.py", "terminal_app.py"):
+    for optional_name in ("claude_all.py", "terminal_app.py", "warp.py"):
         optional_module = source_root / "lib" / optional_name
         if optional_module.is_file():
             source_modules.append(optional_module)
@@ -1068,6 +1068,7 @@ def remove_runtime(settings_path: Path) -> bool:
         root / "lib" / "terminal_label.py",
         root / "lib" / "claude_all.py",
         root / "lib" / "terminal_app.py",
+        root / "lib" / "warp.py",
     ]
     changed = False
     for path in candidates:
@@ -1128,6 +1129,14 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "install":
             command_parser.add_argument("--force", action="store_true")
 
+    warp_configure = subparsers.add_parser("configure-warp")
+    warp_configure.add_argument("--home", type=Path, default=None, help=argparse.SUPPRESS)
+    warp_configure.add_argument("--profile", action="append", default=[], dest="profiles")
+    warp_configure.add_argument("--project-dir", type=Path, default=None)
+    for name in ("doctor-warp", "restore-warp"):
+        command_parser = subparsers.add_parser(name)
+        command_parser.add_argument("--home", type=Path, default=None, help=argparse.SUPPRESS)
+
     for name in (
         "configure-terminal-app",
         "doctor-terminal-app",
@@ -1176,6 +1185,34 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 tty_path=args.tty,
                 update_tmux=not args.no_tmux,
             )
+
+        if args.subcommand in {"configure-warp", "doctor-warp", "restore-warp"}:
+            try:
+                from warp import configure as configure_warp, doctor as doctor_warp, restore as restore_warp
+            except ImportError as exc:
+                raise TerminalLabelError(
+                    "Warp support is missing; reinstall or update terminal-label"
+                ) from exc
+            warp_home = (args.home or Path.home()).expanduser()
+            if args.subcommand == "configure-warp":
+                changed, messages = configure_warp(
+                    home=warp_home,
+                    profiles=tuple(args.profiles),
+                    project_dir=args.project_dir,
+                )
+                healthy = True
+                if not changed:
+                    messages.insert(0, "Warp Tab Configs were already configured")
+            elif args.subcommand == "doctor-warp":
+                healthy, messages = doctor_warp(home=warp_home)
+            else:
+                changed, messages = restore_warp(home=warp_home)
+                healthy = True
+                if not changed:
+                    messages.insert(0, "Warp Tab Configs were not configured")
+            for message in messages:
+                print(message)
+            return 0 if healthy else 1
 
         if args.subcommand in {
             "configure-terminal-app",
