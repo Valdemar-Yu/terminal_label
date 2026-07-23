@@ -385,6 +385,18 @@ class BatchLifecycleTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(len(self.runner.calls), call_count)
 
+    def test_rerun_refreshes_recorded_terminal_label_version(self) -> None:
+        self.install()
+        state_path = self.home / ".claude-all" / claude_all.STATE_FILENAME
+        stale = json.loads(state_path.read_text())
+        stale["terminal_label_version"] = "0.2.1"
+        state_path.write_text(json.dumps(stale), encoding="utf-8")
+        updated = self.install()
+        self.assertEqual(
+            updated["terminal_label_version"],
+            claude_all.terminal_label.VERSION,
+        )
+
     def test_preexisting_single_profile_install_is_adopted_not_removed(self) -> None:
         runtime = claude_all.terminal_label.install_runtime(self.shared_settings)
         claude_all.terminal_label.install(self.shared_settings, runtime)

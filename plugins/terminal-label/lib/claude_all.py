@@ -679,6 +679,7 @@ def batch_install(
                 "previous claude-all installation is incomplete; run uninstall-claude-all before retrying"
             )
         expected_state_hash = _file_hash(path)
+        state["terminal_label_version"] = terminal_label.VERSION
         state["complete"] = False
         _write_state(path, state, expected_state_hash)
         state_hash = _file_hash(path)

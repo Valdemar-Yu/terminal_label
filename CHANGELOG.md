@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-07-23
+
+### Fixed
+
+- Refresh the recorded Terminal Label version when an existing claude-all batch
+  installation is upgraded in place.
+
 ## [0.2.2] - 2026-07-23
 
 ### Fixed
@@ -48,7 +55,8 @@ All notable changes to this project are documented here. The format follows
 - Terminal title support for common macOS and Linux terminal emulators, with
   best-effort tmux handling.
 
-[Unreleased]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.1.0...v0.2.0
