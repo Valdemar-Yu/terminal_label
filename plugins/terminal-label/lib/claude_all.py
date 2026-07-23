@@ -628,7 +628,9 @@ def _preflight_state(state: Mapping[str, Any]) -> List[str]:
         expected = entry.get("installed_hash")
         current = _file_hash(path)
         allowed_hashes = {expected}
-        if entry.get("stage") == "pending":
+        if entry.get("stage") == "pending" or entry.get("local_cleanup") in {
+            "profile_restoring", "profile_restored"
+        }:
             allowed_hashes.add(entry.get("original_hash"))
         if not isinstance(expected, str) or current not in allowed_hashes:
             conflicts.append("installed file hash changed: %s" % path)
@@ -636,7 +638,10 @@ def _preflight_state(state: Mapping[str, Any]) -> List[str]:
         original_hash = entry.get("original_hash")
         if not isinstance(backup_value, str):
             conflicts.append("missing profile backup: %s" % path)
-        elif not isinstance(original_hash, str) or _file_hash(Path(backup_value)) != original_hash:
+        elif entry.get("local_cleanup") != "profile_restored" and (
+            not isinstance(original_hash, str)
+            or _file_hash(Path(backup_value)) != original_hash
+        ):
             conflicts.append("backup file hash changed: %s" % backup_value)
     return conflicts
 
@@ -886,14 +891,15 @@ def batch_uninstall(
     configs = list(state["configs"])
 
     # Validate every owned settings file before the first destructive change.
+    # Entries with a cleanup marker are resumed below instead of re-preflighted.
     for entry in configs:
+        cleanup = entry.get("local_cleanup")
         if entry.get("settings_owned") and entry.get("stage") in {
             "runtime_installed", "installed"
-        }:
+        } and cleanup is None:
             owned = terminal_label.validate_uninstall(
                 Path(entry["path"]), Path(entry["runtime"])
             )
-            entry["settings_active"] = owned
             if entry.get("stage") == "installed" and not owned:
                 raise terminal_label.ConfigConflict(
                     "managed statusLine was replaced after batch install: %s"
@@ -945,15 +951,31 @@ def batch_uninstall(
         executable = Path(entry["runtime"])
         changed = False
         backup = None
-        if entry.get("settings_owned") and (
-            entry.get("stage") == "installed" or entry.get("settings_active")
-        ):
-            changed, backup = terminal_label.uninstall(settings_path, executable)
-        runtime_removed = (
-            terminal_label.remove_runtime(settings_path)
-            if entry.get("runtime_owned")
-            else False
-        )
+        cleanup = entry.get("local_cleanup")
+        if cleanup not in {"settings_restored", "runtime_removing", "runtime_removed"}:
+            entry["local_cleanup"] = "settings_restoring"
+            _write_state(path, state, state_hash)
+            state_hash = _file_hash(path)
+            if entry.get("settings_owned") and terminal_label.validate_uninstall(
+                settings_path, executable
+            ):
+                changed, backup = terminal_label.uninstall(settings_path, executable)
+            entry["local_cleanup"] = "settings_restored"
+            _write_state(path, state, state_hash)
+            state_hash = _file_hash(path)
+        runtime_removed = False
+        if entry.get("local_cleanup") != "runtime_removed":
+            entry["local_cleanup"] = "runtime_removing"
+            _write_state(path, state, state_hash)
+            state_hash = _file_hash(path)
+            runtime_removed = (
+                terminal_label.remove_runtime(settings_path)
+                if entry.get("runtime_owned")
+                else False
+            )
+            entry["local_cleanup"] = "runtime_removed"
+            _write_state(path, state, state_hash)
+            state_hash = _file_hash(path)
         uninstalled_configs.append(
             {
                 "path": str(settings_path),
@@ -967,21 +989,32 @@ def batch_uninstall(
     for entry in reversed(state["profiles"]):
         profile_path = Path(entry["path"])
         backup = Path(entry["backup"])
-        replacement = backup.read_bytes()
-        current_hash = _file_hash(profile_path)
-        if current_hash == entry["installed_hash"]:
-            _atomic_replace(
-                profile_path,
-                replacement,
-                entry["installed_hash"],
-                mode=0o600,
-            )
-            restored_profiles.append(str(profile_path))
-        elif current_hash != entry["original_hash"]:
-            raise terminal_label.ConfigConflict(
-                "profile changed during batch operation: %s" % profile_path
-            )
-        backup.unlink()
+        cleanup = entry.get("local_cleanup")
+        if cleanup != "profile_restored":
+            entry["local_cleanup"] = "profile_restoring"
+            _write_state(path, state, state_hash)
+            state_hash = _file_hash(path)
+            replacement = backup.read_bytes()
+            current_hash = _file_hash(profile_path)
+            if current_hash == entry["installed_hash"]:
+                _atomic_replace(
+                    profile_path,
+                    replacement,
+                    entry["installed_hash"],
+                    mode=0o600,
+                )
+                restored_profiles.append(str(profile_path))
+            elif current_hash != entry["original_hash"]:
+                raise terminal_label.ConfigConflict(
+                    "profile changed during batch operation: %s" % profile_path
+                )
+            entry["local_cleanup"] = "profile_restored"
+            _write_state(path, state, state_hash)
+            state_hash = _file_hash(path)
+        try:
+            backup.unlink()
+        except FileNotFoundError:
+            pass
 
     try:
         path.unlink()

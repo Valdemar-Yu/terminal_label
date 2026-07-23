@@ -469,7 +469,7 @@ class CliTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual(completed.stdout, "terminal-label 0.2.1\n")
+        self.assertEqual(completed.stdout, "terminal-label 0.2.2\n")
 
     def test_claudish_wrapper_preserves_model_effort_and_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-23
+
+### Fixed
+
+- Checkpoint each local batch-uninstall step so an interrupted multi-profile
+  restore can resume without losing state.
+
 ## [0.2.1] - 2026-07-22
 
 ### Fixed
@@ -41,7 +48,8 @@ All notable changes to this project are documented here. The format follows
 - Terminal title support for common macOS and Linux terminal emulators, with
   best-effort tmux handling.
 
-[Unreleased]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Valdemar-Yu/terminal_label/releases/tag/v0.1.0

@@ -455,6 +455,34 @@ class BatchLifecycleTests(unittest.TestCase):
         self.assertEqual(self.plbbl_settings.read_bytes(), plbbl_before)
         self.assertTrue(plbbl_runtime.is_file())
 
+    def test_uninstall_resumes_after_local_restore_interruption(self) -> None:
+        state = self.install()
+        state_path = self.home / ".claude-all" / claude_all.STATE_FILENAME
+        config = next(entry for entry in state["configs"] if entry["settings_owned"])
+        settings = Path(config["path"])
+        runtime = Path(config["runtime"])
+        claude_all.terminal_label.uninstall(settings, runtime)
+        config["local_cleanup"] = "settings_restoring"
+
+        profile = state["profiles"][0]
+        profile_path = Path(profile["path"])
+        backup = Path(profile["backup"])
+        claude_all._atomic_replace(
+            profile_path,
+            backup.read_bytes(),
+            profile["installed_hash"],
+            mode=0o600,
+        )
+        profile["local_cleanup"] = "profile_restoring"
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+        state_path.chmod(0o600)
+
+        claude_all.batch_uninstall(home=self.home, plugin_runner=self.runner)
+
+        self.assertFalse(state_path.exists())
+        self.assertEqual(profile_path.read_bytes(), self.original_profiles[profile_path])
+        self.assertFalse(runtime.exists())
+
     def test_uninstall_refuses_profile_hash_conflict_before_plugin_commands(self) -> None:
         self.install()
         call_count = len(self.runner.calls)

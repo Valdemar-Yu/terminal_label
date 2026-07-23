@@ -20,7 +20,7 @@ import unicodedata
 from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 DEFAULT_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 MANAGED_FLAG = "--terminal-label-managed"
 TITLE_ENV_KEY = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"
