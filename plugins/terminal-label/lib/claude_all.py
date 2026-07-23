@@ -854,6 +854,7 @@ def batch_doctor(
         runtime_root = executable.parent.parent
         for relative in (
             Path("lib/claude_all.py"),
+            Path("lib/terminal_app.py"),
             Path("bin/terminal-label-claudish"),
         ):
             candidate = runtime_root / relative

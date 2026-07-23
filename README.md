@@ -121,6 +121,38 @@ claude --plugin-dir ./plugins/terminal-label
 
 Run `/terminal-label:setup` in that development session.
 
+### Show only the label in macOS Terminal
+
+Terminal.app can append the working directory, active process, full arguments,
+TTY, and dimensions after a custom title. Configure the active/default profile
+so a tab with a Terminal Label title shows only `model · session`:
+
+```text
+/terminal-label:configure-terminal-app
+```
+
+From a source checkout or installed runtime:
+
+```bash
+./plugins/terminal-label/bin/terminal-label configure-terminal-app
+```
+
+Terminal.app caches profile title components. Quit and reopen Terminal.app after
+configuration; opening only a new window in the same app process is insufficient.
+Check or reverse the setting with:
+
+```bash
+./plugins/terminal-label/bin/terminal-label doctor-terminal-app
+./plugins/terminal-label/bin/terminal-label restore-terminal-app
+```
+
+Terminal Label disables the profile's window/tab title components, including
+cwd, process name and arguments, TTY, settings name, and dimensions. This applies
+to every tab using that Terminal profile; use a dedicated profile if ordinary
+shell tabs should retain those components. The complete Terminal plist is backed
+up locally with mode `0600`, and restore refuses to overwrite a later manual
+change.
+
 ## How it works
 
 Claude Code passes live session data to a custom status line process, including
@@ -146,6 +178,7 @@ uninstall can restore them. Prompts and transcript contents are never read.
 | --- | --- |
 | `/terminal-label:setup` | Install or update one profile's status line proxy |
 | `/terminal-label:setup-claude-all` | Discover and install every claude-all profile |
+| `/terminal-label:configure-terminal-app` | Hide extra Terminal.app title components |
 | `/terminal-label:doctor` | Check config, runtime, terminal, and tmux detection |
 | `/terminal-label:uninstall` | Restore the previous Claude Code settings |
 

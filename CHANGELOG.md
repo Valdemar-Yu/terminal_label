@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-23
+
+### Added
+
+- Reversible macOS Terminal profile setup that shows only the custom Terminal
+  Label title instead of appending cwd, process arguments, TTY, and dimensions.
+- `configure-terminal-app`, `doctor-terminal-app`, and `restore-terminal-app`
+  commands plus an explicit setup skill.
+
 ## [0.2.3] - 2026-07-23
 
 ### Fixed
@@ -55,7 +64,8 @@ All notable changes to this project are documented here. The format follows
 - Terminal title support for common macOS and Linux terminal emulators, with
   best-effort tmux handling.
 
-[Unreleased]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/Valdemar-Yu/terminal_label/compare/v0.2.0...v0.2.1

@@ -115,6 +115,34 @@ claude --plugin-dir ./plugins/terminal-label
 
 在这个开发 session 中运行 `/terminal-label:setup`。
 
+### macOS Terminal 只显示标签内容
+
+Terminal.app 默认会在自定义标题后拼接工作目录、活动进程、完整参数、TTY 和尺寸。
+运行下面的 skill，可让存在 Terminal Label 标题的标签只显示 `模型 · session`：
+
+```text
+/terminal-label:configure-terminal-app
+```
+
+从源码 checkout 或稳定运行时执行的等价命令：
+
+```bash
+./plugins/terminal-label/bin/terminal-label configure-terminal-app
+```
+
+Terminal.app 会在进程生命周期内缓存 profile 标题组件。配置后必须退出并重新打开
+Terminal.app；只在同一进程中新建窗口不会生效。检查和恢复命令：
+
+```bash
+./plugins/terminal-label/bin/terminal-label doctor-terminal-app
+./plugins/terminal-label/bin/terminal-label restore-terminal-app
+```
+
+Terminal Label 会关闭该 profile 的窗口/标签标题组件，包括 cwd、进程名和参数、
+TTY、settings 名称及尺寸。所有使用该 Terminal profile 的标签都会受影响；如果普通
+shell 标签仍需这些组件，应使用单独 profile。完整 Terminal plist 会以 `0600` 权限
+备份在本机；如果之后手工改变过这些设置，恢复命令会报告冲突而不是覆盖。
+
 ## 工作原理
 
 Claude Code 会把 `model.display_name`、`session_name` 和当前工作区等实时信息
@@ -136,6 +164,7 @@ Code 内置动态标题。原 status line 和标题
 | --- | --- |
 | `/terminal-label:setup` | 安装或更新单个 profile 的 status line 代理 |
 | `/terminal-label:setup-claude-all` | 发现并安装全部 claude-all profile |
+| `/terminal-label:configure-terminal-app` | 隐藏 Terminal.app 额外标题组件 |
 | `/terminal-label:doctor` | 检查配置、运行时、终端和 tmux 检测结果 |
 | `/terminal-label:uninstall` | 恢复安装前的 Claude Code 设置 |
 
